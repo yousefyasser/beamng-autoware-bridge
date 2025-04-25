@@ -4,7 +4,11 @@
 
   - go to ros2 workspace dir `cd ros2_ws`
   - Replace the file in `ros2_ws/src/beamng-ros2-integration/beamng_ros2/config/scenarios/example_tech_ground.json` with `example_tech_ground.json` from this repo
-  - Re-build the ros package `colcon build --packages-select beamng_ros2`
+  - Re-build the ros package
+    ```bash
+    colcon build --packages-select beamng_ros2
+    source install/setup.bash
+    ```
 
   - Open BeamNG simulator
   - Launch Autoware e2e_simulator
