@@ -211,32 +211,10 @@ def main():
         bng = BeamNGpy(windows_ip, 25252, home=beamng_home)
         bng.open(launch=False)
         
-        # Create scenario
-        scenario = Scenario(
-        "smallgrid",
-        "LiDAR_demo",
-        description="Spanning the map with a LiDAR sensor",
-        )
-
-        # Add main vehicle with sensors
-
-        car = Vehicle(
-            'ego',
-            model='etk800',
-            licence='RED',
-            color='Red'
-        )
+        scenario = bng.scenario.get_current()
+        active_vehicles = bng.vehicles.get_current()
+        car = active_vehicles["ego"]
         
-        # car.connect(bng)
-        scenario.add_vehicle(car, pos=(0,0,0), rot_quat=(0,0,math.sin(math.radians(-90)/2),1))
-        
-
-        scenario.make(bng)
-        bng.load_scenario(scenario)
-        bng.start_scenario()
-
-        time.sleep(2)
-
         # Setup camera
         # camera = Camera(
         #     'camera1',
@@ -255,16 +233,17 @@ def main():
 
         # Setup LIDAR
         lidar = Lidar(
-        "lidar1",
-        bng,
-        car,
-        requested_update_time=0.1,
-        is_using_shared_memory=False,
-        is_360_mode=True,
-        dir=(0,-1,0),
-        pos=(0,0,3.0),
-
+            "lidar1",
+            bng,
+            car,
+            requested_update_time=0.1,
+            is_using_shared_memory=False,
+            is_360_mode=True,
+            dir=(0,-1,0),
+            pos=(0,0,3.0),
         )
+
+        car.connect(bng)
 
     #     RANGE_MIN = 0.1
     #     RANGE_MAX = 100.0
@@ -299,7 +278,8 @@ def main():
         try:
             index = 0
             while True:
-                scenario_node.publish_car_state(car.state)
+                # scenario_node.publish_car_state(car.state)
+
                 # Poll LIDAR data
                 lidar_data = lidar.poll()
                 if lidar_data and 'pointCloud' in lidar_data:
@@ -334,6 +314,7 @@ def main():
                 time.sleep(1)
         except KeyboardInterrupt:
             lidar.remove()
+            bng.disconnect()
             print("\nStopping sensor polling...")
         
         input("Press Enter to Stop")
