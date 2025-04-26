@@ -5,10 +5,13 @@ from rclpy.node import Node
 import tf2_ros
 
 from std_msgs.msg import Header
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2, PointField, Imu
 from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import PoseWithCovarianceStamped
+
+from beamng_msgs.msg import StateSensor
+from autoware_auto_vehicle_msgs.msg import SteeringReport, VelocityReport, ControlModeReport
 
 import math
 
@@ -17,16 +20,24 @@ class AutowareBeamngBridge(Node):
     def __init__(self):
         super().__init__('beamng_scenario')
 
+        self.vehicle_velocity = 0.0;
+
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         self.static_tf_broadcaster = tf2_ros.StaticTransformBroadcaster(self)
 
+        self.create_publishers()
+        self.create_subscriptions()
+        
+        self.publish_static_transforms()
+        self.publish_initial_pose()
+
+    def create_publishers(self):
         self.lidar_publisher = self.create_publisher(
             PointCloud2,
             '/sensing/lidar/concatenated/pointcloud',
             10
         )
 
-        # Add publisher for initial pose
         self.initial_pose_publisher = self.create_publisher(
             PoseStamped,
             '/initialpose',
@@ -38,13 +49,40 @@ class AutowareBeamngBridge(Node):
             '/sensing/gnss/pose_with_covariance', 
             1
         )
+
+        self._steering_status_publisher = self.create_publisher(
+            SteeringReport, 
+            '/vehicle/status/steering_status', 
+            1
+        )
         
-        # Publish initial static transforms
-        self.publish_static_transforms()
+        self._vehicle_control_mode_publisher = self.create_publisher(
+            ControlModeReport, 
+            '/vehicle/status/control_mode', 
+            1
+        )
         
-        # Publish initial pose
-        self.publish_initial_pose()
+        self._velocity_report_publisher = self.create_publisher(
+            VelocityReport, 
+            '/vehicle/status/velocity_status', 
+            1
+        )
     
+    def create_subscriptions(self):
+        self.state_subscriber = self.create_subscription(
+            StateSensor,
+            '/vehicles/ego/sensors/state',
+            self._state_callback,
+            1
+        )
+        
+        self.imu_subscriber = self.create_subscription(
+            Imu,
+            '/vehicles/ego/sensors/position_imu0',
+            self._imu_callback,
+            1
+        )
+
     def publish_initial_pose(self):
         # Create PoseStamped message
         pose_msg = PoseStamped()
@@ -52,29 +90,30 @@ class AutowareBeamngBridge(Node):
         pose_msg.header.frame_id = 'map'
         
         # Set position
-        pose_msg.pose.position.x = 0.0
-        pose_msg.pose.position.y = 0.0
+        pose_msg.pose.position.x = 3739.25
+        pose_msg.pose.position.y = 73729.0
         pose_msg.pose.position.z = 0.0
         
         # Set orientation (-90 degrees yaw)
         angle = math.radians(90)
         pose_msg.pose.orientation.x = 0.0
         pose_msg.pose.orientation.y = 0.0
-        pose_msg.pose.orientation.z = math.sin(angle/2)
-        pose_msg.pose.orientation.w = math.cos(angle/2)
+        pose_msg.pose.orientation.z = -0.980555
+        pose_msg.pose.orientation.w = 0.196243
         
         # Publish the message
         self.initial_pose_publisher.publish(pose_msg)
         self.get_logger().info("Published initial pose to /initialpose")
 
-    def publish_car_state(self, state_msg):
-        # velocity_report_msg = state_msg
+    def _state_callback(self, state_msg):
+        # Publish static control mode
+        control_mode_msg = ControlModeReport()
+        control_mode_msg.stamp = self.get_clock().now().to_msg()
+        control_mode_msg.mode = 1
+        self._vehicle_control_mode_publisher.publish(control_mode_msg)
 
-        header = Header()
-        header.frame_id = 'base_link'
-        header.stamp = state_msg.header.stamp
-        # velocity_report_msg.header = header
-        # self._velocity_report_publisher.publish(velocity_report_msg)
+
+        self.vehicle_velocity = np.sqrt(state_msg.velocity.x ** 2 + state_msg.velocity.y ** 2 + state_msg.velocity.z ** 2)
 
         # pose_with_cov msg
         out_pose_with_cov = PoseWithCovarianceStamped()
@@ -96,6 +135,18 @@ class AutowareBeamngBridge(Node):
             ]
         self._pose_with_cov_publisher.publish(out_pose_with_cov)
 
+    def _imu_callback(self, imu_msg):
+        output_velocity_report = VelocityReport()
+        output_velocity_report.heading_rate = -imu_msg.angular_velocity.z
+        output_velocity_report.longitudinal_velocity = self.vehicle_velocity
+        output_velocity_report.lateral_velocity = -imu_msg.linear_acceleration.y 
+
+        header = Header()
+        header.frame_id = 'base_link'
+        header.stamp = imu_msg.header.stamp
+        output_velocity_report.header = header
+        self._velocity_report_publisher.publish(output_velocity_report)
+
     def publish_static_transforms(self):
         # Create transform from map to base_link
         map_to_base = TransformStamped()
@@ -103,8 +154,8 @@ class AutowareBeamngBridge(Node):
         map_to_base.header.frame_id = 'map'
         map_to_base.child_frame_id = 'base_link'
         # Set vehicle's initial position in the map
-        map_to_base.transform.translation.x = 0.0
-        map_to_base.transform.translation.y = 0.0
+        map_to_base.transform.translation.x = 3739.25
+        map_to_base.transform.translation.y = 73729.0
         map_to_base.transform.translation.z = 0.0
         
         # Set rotation to -90 degrees around Z axis (yaw)
@@ -113,8 +164,8 @@ class AutowareBeamngBridge(Node):
         angle = math.radians(90)
         map_to_base.transform.rotation.x = 0.0
         map_to_base.transform.rotation.y = 0.0
-        map_to_base.transform.rotation.z = math.sin(angle/2)
-        map_to_base.transform.rotation.w = math.cos(angle/2)
+        map_to_base.transform.rotation.z = -0.980555
+        map_to_base.transform.rotation.w = 0.196243
         
         # Create transform from base_link to lidar
         base_to_lidar = TransformStamped()
