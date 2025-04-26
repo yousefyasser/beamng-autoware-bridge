@@ -20,7 +20,12 @@ class AutowareBeamngBridge(Node):
     def __init__(self):
         super().__init__('beamng_scenario')
 
-        self.vehicle_velocity = 0.0;
+        self.vehicle_velocity = 0.0
+        self.initial_pose = {
+            'x': 3739.25,
+            'y': 73729.0,
+            'z': 0.0
+        }
 
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         self.static_tf_broadcaster = tf2_ros.StaticTransformBroadcaster(self)
@@ -28,8 +33,7 @@ class AutowareBeamngBridge(Node):
         self.create_publishers()
         self.create_subscriptions()
         
-        self.publish_static_transforms()
-        self.publish_initial_pose()
+        self._publish_static_transforms()
 
     def create_publishers(self):
         self.lidar_publisher = self.create_publisher(
@@ -83,28 +87,6 @@ class AutowareBeamngBridge(Node):
             1
         )
 
-    def publish_initial_pose(self):
-        # Create PoseStamped message
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.header.frame_id = 'map'
-        
-        # Set position
-        pose_msg.pose.position.x = 3739.25
-        pose_msg.pose.position.y = 73729.0
-        pose_msg.pose.position.z = 0.0
-        
-        # Set orientation (-90 degrees yaw)
-        angle = math.radians(90)
-        pose_msg.pose.orientation.x = 0.0
-        pose_msg.pose.orientation.y = 0.0
-        pose_msg.pose.orientation.z = -0.980555
-        pose_msg.pose.orientation.w = 0.196243
-        
-        # Publish the message
-        self.initial_pose_publisher.publish(pose_msg)
-        self.get_logger().info("Published initial pose to /initialpose")
-
     def _state_callback(self, state_msg):
         # Publish static control mode
         control_mode_msg = ControlModeReport()
@@ -120,10 +102,10 @@ class AutowareBeamngBridge(Node):
         out_pose_with_cov.header.frame_id = 'map'
         out_pose_with_cov.header.stamp = state_msg.header.stamp
         out_pose_with_cov.pose.pose.position = state_msg.position
-        out_pose_with_cov.pose.pose.orientation.x = state_msg.dir.x
-        out_pose_with_cov.pose.pose.orientation.y = state_msg.dir.y
-        out_pose_with_cov.pose.pose.orientation.z = state_msg.dir.z
-        out_pose_with_cov.pose.pose.orientation.w = 1.0
+        out_pose_with_cov.pose.pose.orientation.x = 0.0
+        out_pose_with_cov.pose.pose.orientation.y = 0.0
+        out_pose_with_cov.pose.pose.orientation.z = state_msg.dir.y
+        out_pose_with_cov.pose.pose.orientation.w = state_msg.dir.x
 
         out_pose_with_cov.pose.covariance = [
             0.1,0.0,0.0,0.0,0.0,0.0,
@@ -134,6 +116,7 @@ class AutowareBeamngBridge(Node):
             0.0,0.0,0.0,0.0,0.0,0.0
             ]
         self._pose_with_cov_publisher.publish(out_pose_with_cov)
+        self._publish_dynamic_transforms(state_msg)
 
     def _imu_callback(self, imu_msg):
         output_velocity_report = VelocityReport()
@@ -147,26 +130,7 @@ class AutowareBeamngBridge(Node):
         output_velocity_report.header = header
         self._velocity_report_publisher.publish(output_velocity_report)
 
-    def publish_static_transforms(self):
-        # Create transform from map to base_link
-        map_to_base = TransformStamped()
-        map_to_base.header.stamp = self.get_clock().now().to_msg()
-        map_to_base.header.frame_id = 'map'
-        map_to_base.child_frame_id = 'base_link'
-        # Set vehicle's initial position in the map
-        map_to_base.transform.translation.x = 3739.25
-        map_to_base.transform.translation.y = 73729.0
-        map_to_base.transform.translation.z = 0.0
-        
-        # Set rotation to -90 degrees around Z axis (yaw)
-        # Convert to quaternion (w, x, y, z)
-        
-        angle = math.radians(90)
-        map_to_base.transform.rotation.x = 0.0
-        map_to_base.transform.rotation.y = 0.0
-        map_to_base.transform.rotation.z = -0.980555
-        map_to_base.transform.rotation.w = 0.196243
-        
+    def _publish_static_transforms(self):
         # Create transform from base_link to lidar
         base_to_lidar = TransformStamped()
         base_to_lidar.header.stamp = self.get_clock().now().to_msg()
@@ -178,23 +142,29 @@ class AutowareBeamngBridge(Node):
         base_to_lidar.transform.rotation.w = 1.0
 
         # Publish both transforms
-        self.static_tf_broadcaster.sendTransform([map_to_base, base_to_lidar])
+        self.static_tf_broadcaster.sendTransform([base_to_lidar])
+
+    def _publish_dynamic_transforms(self, state_msg):
+        # Create transform from map to base_link
+        map_to_base = TransformStamped()
+        map_to_base.header.stamp = self.get_clock().now().to_msg()
+        map_to_base.header.frame_id = 'map'
+        map_to_base.child_frame_id = 'base_link'
+        # Set vehicle's initial position in the map
+        map_to_base.transform.translation.x = self.initial_pose['x'] + state_msg.position.x
+        map_to_base.transform.translation.y = self.initial_pose['y'] + state_msg.position.y
+        map_to_base.transform.translation.z = self.initial_pose['z'] 
+        
+        # Convert to quaternion (w, x, y, z)
+        
+        map_to_base.transform.rotation.x = 0.0
+        map_to_base.transform.rotation.y = 0.0 
+        map_to_base.transform.rotation.z = state_msg.dir.y
+        map_to_base.transform.rotation.w = state_msg.dir.x
+
+        self.tf_broadcaster.sendTransform(map_to_base)
 
     def publish_lidar_data(self, point_cloud):
-        # Get current vehicle position from BeamNG
-        # Get rotation as well
-        
-        # Update transform with current vehicle position
-        tf = TransformStamped()
-        tf.header.stamp = self.get_clock().now().to_msg()
-        tf.header.frame_id = 'base_link'
-        tf.child_frame_id = 'lidar_top'
-        tf.transform.translation.x = 0.0  # Adjust these values based on your LIDAR position
-        tf.transform.translation.y = 0.0
-        tf.transform.translation.z = 3.0
-        tf.transform.rotation.w = 1.0
-        self.tf_broadcaster.sendTransform(tf)
-
         # Publish LIDAR data
         msg = PointCloud2()
         msg.header = Header()
