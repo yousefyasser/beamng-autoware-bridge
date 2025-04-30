@@ -1,7 +1,7 @@
 from autowareBeamngBridge import AutowareBeamngBridge
 
 from beamngpy import BeamNGpy, Scenario, Vehicle
-from beamngpy.sensors import Camera, Lidar, Radar
+from beamngpy.sensors import Camera, Lidar, Radar, State
 
 import rclpy
 import sys
@@ -9,6 +9,7 @@ import os
 import subprocess
 import time
 import numpy as np
+import threading
 
 class ScenarioRunner:
     def __init__(self):
@@ -37,14 +38,19 @@ class ScenarioRunner:
             self.car.connect(self.bng)
             self.car.ai_set_mode('manual')
 
+            self.spin_thread = threading.Thread(target=rclpy.spin, args=(scenario_node,))
+            self.spin_thread.start()
+
             print("Scenario loaded. Starting sensor polling...")
 
             try:
                 index = 0
-                while True:
-                    # scenario_node.publish_car_state(self.car.state)
 
+                while True:
                     # Poll LIDAR data
+                    # self.car.sensors.poll()
+                    # print(self.car.state)
+
                     lidar_data = self.sensors[0].poll()
 
                     if lidar_data and 'pointCloud' in lidar_data:
@@ -60,9 +66,8 @@ class ScenarioRunner:
                         #     print(f"- Max distance: {np.max(valid_distances):.2f}m")
 
                     # Process ROS callbacks
-                    rclpy.spin_once(scenario_node, timeout_sec=0.01)
-                    
-                    time.sleep(0.1)
+                    # rclpy.spin_once(scenario_node, timeout_sec=0.01)
+
                     # images = camera.poll()
                     # if images and "colour" in images and images["colour"]:
                     #     output_path = "vehicle_image_%03d.png" % index
@@ -78,7 +83,8 @@ class ScenarioRunner:
 
                     time.sleep(1)
             except KeyboardInterrupt:
-                bng.disconnect()
+                self.bng.disconnect()
+                self.spin_thread.join()
                 print("\nStopping sensor polling...")
 
         except Exception as e:
