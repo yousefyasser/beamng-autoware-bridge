@@ -1,7 +1,7 @@
 from autowareBeamngBridge import AutowareBeamngBridge
 
 from beamngpy import BeamNGpy, Scenario, Vehicle
-from beamngpy.sensors import Camera, Lidar, Radar, State
+from beamngpy.sensors import Camera, Lidar, Radar, State, Electrics, AdvancedIMU
 
 import rclpy
 import sys
@@ -14,7 +14,6 @@ import threading
 class ScenarioRunner:
     def __init__(self):
         rclpy.init()
-        scenario_node = AutowareBeamngBridge()
         beamng_home = os.getenv('BNG_HOME')
 
         if not beamng_home:
@@ -30,14 +29,30 @@ class ScenarioRunner:
             self.bng = BeamNGpy(windows_ip, 25252, home=beamng_home)
             self.bng.open(launch=False)
             
-            scenario = self.bng.scenario.get_current()
-            active_vehicles = self.bng.vehicles.get_current()
-            self.car = active_vehicles["ego"]
+            scenario = Scenario(
+                "smallgrid",
+                "LiDAR_demo",
+                description="Spanning the map with a LiDAR sensor",
+            )
+
+            self.car = Vehicle(
+                'ego',
+                model='etk800',
+                licence='RED',
+                color='Red'
+            )
+            
+            scenario.add_vehicle(self.car, pos=(0,0,0), rot_quat=(0.0, 0.0, 0.15, 0.258382))
+            
+            scenario.make(self.bng)
+            self.bng.load_scenario(scenario)
+            self.bng.start_scenario()
             
             self._setup_sensors()
             self.car.connect(self.bng)
             self.car.ai_set_mode('manual')
 
+            scenario_node = AutowareBeamngBridge(self.car, self.sensors[1])
             self.spin_thread = threading.Thread(target=rclpy.spin, args=(scenario_node,))
             self.spin_thread.start()
 
@@ -47,10 +62,6 @@ class ScenarioRunner:
                 index = 0
 
                 while True:
-                    # Poll LIDAR data
-                    # self.car.sensors.poll()
-                    # print(self.car.state)
-
                     lidar_data = self.sensors[0].poll()
 
                     if lidar_data and 'pointCloud' in lidar_data:
@@ -81,7 +92,7 @@ class ScenarioRunner:
 
                     # print(radar_data)
 
-                    time.sleep(1)
+                    time.sleep(0.1)
             except KeyboardInterrupt:
                 self.bng.disconnect()
                 self.spin_thread.join()
@@ -129,7 +140,16 @@ class ScenarioRunner:
             pos=(0,0,3.0),
         )
 
-        self.sensors = [lidar]
+        imu = AdvancedIMU(
+            "imu1",
+            self.bng,
+            self.car,
+            is_send_immediately=True,
+        )
+
+        self.car.sensors.attach("electrics2", Electrics())
+
+        self.sensors = [lidar, imu]
 
         # camera = Camera(
         #     'camera1',
