@@ -4,6 +4,7 @@ from beamngpy import BeamNGpy, Scenario, Vehicle
 from beamngpy.sensors import Camera, Lidar, Radar, State, Electrics, AdvancedIMU
 
 from autowareBeamngBridge import AutowareBeamngBridge
+from sensors.LidarPublisher import LidarPublisher
 
 
 class ScenarioRunner:
@@ -49,71 +50,31 @@ class ScenarioRunner:
             self.car.connect(self.bng)
             self.car.ai_set_mode('manual')
 
-            scenario_node = AutowareBeamngBridge(self.car, self.sensors[1])
-            self.spin_thread = threading.Thread(target=rclpy.spin, args=(scenario_node,))
-            self.spin_thread.start()
+            print('\033[95m' + "================= Scenario loaded ===================\n")
 
-            print("Scenario loaded. Starting sensor polling...")
+            stop_event = threading.Event()
+            stop_thread = threading.Thread(target=lambda: (input("Press Enter to stop...\n"), stop_event.set()))
+            stop_thread.start()
 
-            try:
-                index = 0
+            scenario_node = AutowareBeamngBridge(self.car, self.sensors[0])
+            lidar_node = LidarPublisher(self.bng, self.car)
 
-                while True:
-                    lidar_data = self.sensors[0].poll()
+            scenario_thread = threading.Thread(target=scenario_node.start_publishers, args=(stop_event,))
+            scenario_thread.start()
 
-                    if lidar_data and 'pointCloud' in lidar_data:
-                        point_cloud = lidar_data['pointCloud']
-                        scenario_node.publish_lidar_data(point_cloud)  # Pass car object
-                        distances = np.sqrt(np.sum(point_cloud**2, axis=1))
-                        valid_distances = distances[distances > 0]
-                        
-                        # if len(valid_distances) > 0:
-                        #     print("\nLIDAR Data:")
-                        #     print(f"- Valid points: {len(valid_distances)}")
-                        #     print(f"- Min distance: {np.min(valid_distances):.2f}m")
-                        #     print(f"- Max distance: {np.max(valid_distances):.2f}m")
+            lidar_thread = threading.Thread(target=lidar_node.collect_pcd, args=(stop_event,))
+            lidar_thread.start()
 
-                    # Process ROS callbacks
-                    # rclpy.spin_once(scenario_node, timeout_sec=0.01)
+            stop_thread.join()
+            scenario_thread.join()
+            lidar_thread.join()
 
-                    # images = camera.poll()
-                    # if images and "colour" in images and images["colour"]:
-                    #     output_path = "vehicle_image_%03d.png" % index
-                    #     index += 1
-                    #     images["colour"].save(output_path)
-                    #     print(f"Saved image to: {output_path}")
-                    # else:
-                    #     print("Failed to capture image")
-                    
-                    # radar_data = radar.poll()
+            print('\033[91m' + "================= Scenario stopped ===================\n")
+            self.bng.disconnect()
 
-                    # print(radar_data)
-
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                self.bng.disconnect()
-                self.spin_thread.join()
-                print("\nStopping sensor polling...")
 
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
-            print("\nDebug information:")
-            print(f"- BNG_HOME: {beamng_home}")
-            print(f"- Windows Host IP: {windows_ip}")
-            print(f"- Home directory exists: {os.path.exists(beamng_home)}")
-            print(f"- Binary directory exists: {os.path.exists(os.path.join(beamng_home, 'BinLinux'))}")
-            print(f"- BeamNG settings directory exists: {os.path.exists(os.path.expanduser('~/.local/share/BeamNG.drive/0.34'))}")
-            print("\nTroubleshooting:")
-            print("1. Make sure BeamNG.tech is running on Windows")
-            print("2. Check if Windows Defender Firewall is blocking the connection")
-            print("3. Try adding an exception for BeamNG.tech in Windows Firewall")
-            print("4. Try installing an older version of BeamNGpy: pip install beamngpy==1.24")
-        finally:
-            if 'bng' in locals() and bng:
-                try:
-                    pass
-                except:
-                    pass
 
     def _get_windows_ip(self):
         try:
@@ -126,17 +87,6 @@ class ScenarioRunner:
         return '172.24.64.1'
 
     def _setup_sensors(self):
-        lidar = Lidar(
-            "lidar1",
-            self.bng,
-            self.car,
-            requested_update_time=0.1,
-            is_using_shared_memory=False,
-            is_360_mode=True,
-            dir=(0,-1,0),
-            pos=(0,0,3.0),
-        )
-
         imu = AdvancedIMU(
             "imu1",
             self.bng,
@@ -146,7 +96,7 @@ class ScenarioRunner:
 
         self.car.sensors.attach("electrics2", Electrics())
 
-        self.sensors = [lidar, imu]
+        self.sensors = [imu]
 
         # camera = Camera(
         #     'camera1',

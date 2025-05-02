@@ -4,9 +4,10 @@ from std_msgs.msg import Header
 from tier4_vehicle_msgs.msg import ActuationCommandStamped, ActuationStatusStamped
 from autoware_vehicle_msgs.msg import SteeringReport, VelocityReport, ControlModeReport, GearReport
 
+from utils.get_header import get_header
+
 class VehicleStatusPublisher:
-    def __init__(self, clock, electrics, state, publishers):
-        self.clock = clock
+    def __init__(self, electrics, state, publishers):
         self.electrics = electrics
         self.state = state
 
@@ -16,8 +17,7 @@ class VehicleStatusPublisher:
         self.pub_gear_state = publishers['gear_state']
         self.pub_actuation_status = publishers['actuation_status']
 
-    def publish(self, clock, electrics, state):
-        self.clock = clock
+    def publish(self, electrics, state):
         self.state = state
         self.electrics = electrics
     
@@ -28,10 +28,6 @@ class VehicleStatusPublisher:
         self.publish_steering_status()
 
     def publish_velocity_status(self):
-        header = Header()
-        header.frame_id = 'base_link'
-        header.stamp = self.clock
-
         dir_vector = self.state['dir']
         vel_vector = self.state['vel']
         dir_norm = dir_vector / np.linalg.norm(dir_vector)
@@ -47,12 +43,12 @@ class VehicleStatusPublisher:
         output_velocity_report.longitudinal_velocity = longitudinal_vel
         output_velocity_report.lateral_velocity = lateral_vel 
 
-        output_velocity_report.header = header
+        output_velocity_report.header = get_header(frame_id='base_link')
         self.pub_vel_state.publish(output_velocity_report)
 
     def publish_control_mode(self):
         control_mode_msg = ControlModeReport()
-        control_mode_msg.stamp = self.clock
+        control_mode_msg.stamp = get_header().stamp
         control_mode_msg.mode = ControlModeReport.AUTONOMOUS
 
         self.pub_ctrl_mode.publish(control_mode_msg)
@@ -61,7 +57,7 @@ class VehicleStatusPublisher:
         gear_map = {'N': 1, 'R': 20, 'D': 2}
 
         out_gear_state = GearReport()
-        out_gear_state.stamp = self.clock
+        out_gear_state.stamp = get_header().stamp
         out_gear_state.report = gear_map.get(self.electrics['gear'], 0)
 
         self.pub_gear_state.publish(out_gear_state)
@@ -69,8 +65,7 @@ class VehicleStatusPublisher:
     def publish_actuation_status(self):
         out_actuation_status = ActuationStatusStamped()
         
-        out_actuation_status.header.frame_id = 'base_link'
-        out_actuation_status.header.stamp = self.clock
+        out_actuation_status.header = get_header(frame_id='base_link')
         out_actuation_status.status.accel_status = self.electrics['throttle_input']
         out_actuation_status.status.brake_status = self.electrics['brake_input']
         out_actuation_status.status.steer_status = self.electrics['steering_input']
@@ -79,7 +74,7 @@ class VehicleStatusPublisher:
 
     def publish_steering_status(self):
         out_steering_state = SteeringReport()
-        out_steering_state.stamp = self.clock
+        out_steering_state.stamp = get_header().stamp
         out_steering_state.steering_tire_angle = self.electrics['steering_input'] * 0.7 * -1
 
         self.pub_steering_state.publish(out_steering_state)

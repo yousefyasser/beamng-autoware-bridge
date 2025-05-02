@@ -6,13 +6,13 @@ import datetime, time, math, tf2_ros, numpy as np
 from std_msgs.msg import Header
 from rosgraph_msgs.msg import Clock
 from beamng_msgs.msg import StateSensor
-from builtin_interfaces.msg import Time
-from sensor_msgs.msg import PointCloud2, PointField, Imu, Image, CameraInfo
+from sensor_msgs.msg import Imu, Image, CameraInfo
 from tier4_vehicle_msgs.msg import ActuationCommandStamped, ActuationStatusStamped
 from geometry_msgs.msg import TransformStamped, PoseStamped, PoseWithCovarianceStamped
 from autoware_vehicle_msgs.msg import SteeringReport, VelocityReport, ControlModeReport, GearReport
 
 from vehicleStatusPublisher import VehicleStatusPublisher
+from utils.get_header import get_header
 
 
 class AutowareBeamngBridge(Node):
@@ -23,8 +23,6 @@ class AutowareBeamngBridge(Node):
         self.imu = imu
         self.vehicle.sensors.poll()
 
-        self.timestamp = 0.0
-        self.clock = Time(sec=0)
         self.initial_pose = {
             'x': 237.90,
             'y': -894.42,
@@ -80,13 +78,9 @@ class AutowareBeamngBridge(Node):
         }
 
         self.status_publisher = VehicleStatusPublisher(
-            self.clock, self.vehicle.sensors['electrics2'], self.vehicle.sensors['state'], publishers
+            self.vehicle.sensors['electrics2'], self.vehicle.sensors['state'], publishers
         )
 
-        self.create_timer(0.01, self.publish_sim_time)
-        self.create_timer(0.01, self.publish_vehicle_status)
-        self.create_timer(0.01, self.publish_imu)
-        self.create_timer(0.01, self.publish_state)
 
     def _create_publishers(self):
         self._clock_publisher = self.create_publisher(
@@ -99,10 +93,6 @@ class AutowareBeamngBridge(Node):
 
 
         # ============ Sensors Publishers =================
-
-        self.pub_lidar = self.create_publisher(
-            PointCloud2, '/sensing/lidar/concatenated/pointcloud', 10
-        )
 
         self.pub_pose_with_cov = self.create_publisher(
             PoseWithCovarianceStamped, '/sensing/gnss/pose_with_covariance', 1
@@ -140,6 +130,16 @@ class AutowareBeamngBridge(Node):
         #     ActuationCommandStamped, "/control/command/actuation_cmd", self.control_callback, 1
         # )
 
+    def start_publishers(self, stop_event):
+        self.get_logger().info('\033[92m' + "All publishers started except lidar\n")
+
+        while not stop_event.is_set():
+            self.publish_sim_time()
+            self.publish_vehicle_status()
+            self.publish_state()
+            self.publish_imu()
+            time.sleep(0.1)
+        
     # def _publish_initial_pose(self):
     #     # Create PoseStamped message
     #     pose_msg = PoseStamped()
@@ -161,21 +161,15 @@ class AutowareBeamngBridge(Node):
     #     self.get_logger().info("Published initial pose to /initialpose")
 
     def publish_sim_time(self):
-        self.timestamp = time.time()
-
-        seconds = int(self.timestamp)
-        nanoseconds = int((self.timestamp - int(self.timestamp)) * 1000000000.0)
-        
         simulation_time = Clock()
-        simulation_time.clock = Time(sec=seconds, nanosec=nanoseconds)
-        self.clock = simulation_time.clock
+        simulation_time.clock = get_header(frame_id='map').stamp
 
         self._clock_publisher.publish(simulation_time)
 
     def publish_vehicle_status(self):
         self.vehicle.sensors.poll()
         self.status_publisher.publish(
-            self.clock, self.vehicle.sensors['electrics2'], self.vehicle.sensors['state']
+            self.vehicle.sensors['electrics2'], self.vehicle.sensors['state']
         )
 
     def publish_state(self):
@@ -183,8 +177,7 @@ class AutowareBeamngBridge(Node):
 
         # pose_with_cov msg
         out_pose_with_cov = PoseWithCovarianceStamped()
-        out_pose_with_cov.header.frame_id = 'map'
-        out_pose_with_cov.header.stamp = self.clock
+        out_pose_with_cov.header = get_header('map')
         out_pose_with_cov.pose.pose.position.x = state_msg['pos'][0]
         out_pose_with_cov.pose.pose.position.y = state_msg['pos'][1]
         out_pose_with_cov.pose.pose.position.z = state_msg['pos'][2]
@@ -197,12 +190,12 @@ class AutowareBeamngBridge(Node):
         out_pose_with_cov.pose.pose.orientation.w = quat[3]
 
         out_pose_with_cov.pose.covariance = [
-            0.1,0.0,0.0,0.0,0.0,0.0,
-            0.0,0.1,0.0,0.0,0.0,0.0,
-            0.0,0.0,0.1,0.0,0.0,0.0,
-            0.0,0.0,0.0,0.0,0.0,0.0,
-            0.0,0.0,0.0,0.0,0.0,0.0,
-            0.0,0.0,0.0,0.0,0.0,0.0
+            0.01,0.0,0.0,0.0,0.0,0.0,
+            0.0,0.01,0.0,0.0,0.0,0.0,
+            0.0,0.0,0.01,0.0,0.0,0.0,
+            0.0,0.0,0.0,0.01,0.0,0.0,
+            0.0,0.0,0.0,0.0,0.01,0.0,
+            0.0,0.0,0.0,0.0,0.0,0.01
             ]
 
         self.pub_pose_with_cov.publish(out_pose_with_cov)
@@ -212,8 +205,7 @@ class AutowareBeamngBridge(Node):
         imu_msg = self.imu.poll()
         
         out_imu_msg = Imu()
-        out_imu_msg.header.frame_id = 'tamagawa/imu_link_changed'
-        out_imu_msg.header.stamp = self.clock
+        out_imu_msg.header = get_header('tamagawa/imu_link_changed')
 
         out_imu_msg.orientation.x = 0.0
         out_imu_msg.orientation.y = 0.0
@@ -236,44 +228,57 @@ class AutowareBeamngBridge(Node):
         
     def _publish_static_transforms(self):
         # Create transform from base_link to lidar
-        base_to_lidar = TransformStamped()
-        base_to_lidar.header.stamp = self.get_clock().now().to_msg()
-        base_to_lidar.header.frame_id = 'velodyne_top'
-        base_to_lidar.child_frame_id = 'velodyne_top_changed'
-        base_to_lidar.transform.translation.x = 0.0
-        base_to_lidar.transform.translation.y = 0.0
-        base_to_lidar.transform.translation.z = 3.0  # Lidar height above vehicle
-        base_to_lidar.transform.rotation.w = 1.0
+        base_to_lidar_top = TransformStamped()
+        base_to_lidar_top.header = get_header('velodyne_top')
+        base_to_lidar_top.child_frame_id = 'velodyne_top_changed'
+        base_to_lidar_top.transform.translation.x = -0.1
+        base_to_lidar_top.transform.translation.y = 0.65
+        base_to_lidar_top.transform.translation.z = 2.0
+        base_to_lidar_top.transform.rotation.w = 1.0
+        
+        # base_to_lidar_right = TransformStamped()
+        # base_to_lidar_right.header = get_header('velodyne_right')
+        # base_to_lidar_right.child_frame_id = 'velodyne_right_changed'
+        # base_to_lidar_right.transform.translation.x = 0.0
+        # base_to_lidar_right.transform.translation.y = 0.65
+        # base_to_lidar_right.transform.translation.z = 2.0
+        # base_to_lidar_right.transform.rotation.w = 1.0
+        
+        # base_to_lidar_left = TransformStamped()
+        # base_to_lidar_left.header = get_header('velodyne_left')
+        # base_to_lidar_left.child_frame_id = 'velodyne_left_changed'
+        # base_to_lidar_left.transform.translation.x = 0.1
+        # base_to_lidar_left.transform.translation.y = 0.65
+        # base_to_lidar_left.transform.translation.z = 2.0
+        # base_to_lidar_left.transform.rotation.w = 1.0
         
         # Create transform from base_link to lidar
         base_to_imu = TransformStamped()
-        base_to_imu.header.stamp = self.get_clock().now().to_msg()
-        base_to_imu.header.frame_id = 'tamagawa/imu_link'
+        base_to_imu.header = get_header('tamagawa/imu_link')
         base_to_imu.child_frame_id = 'tamagawa/imu_link_changed'
         base_to_imu.transform.translation.x = 0.0
         base_to_imu.transform.translation.y = 0.0
-        base_to_imu.transform.translation.z = 3.0  # Lidar height above vehicle
+        base_to_imu.transform.translation.z = 1.7
         base_to_imu.transform.rotation.w = 1.0
 
-        # base_to_gnss = TransformStamped()
-        # base_to_gnss.header.stamp = self.get_clock().now().to_msg()
-        # base_to_gnss.header.frame_id = 'base_link'
-        # base_to_gnss.child_frame_id = 'gnss'
-        # base_to_gnss.transform.translation.z = 0.0
-        # base_to_gnss.transform.rotation.w = 1.0
+        base_to_gnss = TransformStamped()
+        base_to_gnss.header.stamp = self.get_clock().now().to_msg()
+        base_to_gnss.header.frame_id = 'base_link'
+        base_to_gnss.child_frame_id = 'gnss'
+        base_to_gnss.transform.translation.z = 0.0
+        base_to_gnss.transform.rotation.w = 1.0
 
         # Publish both transforms
-        self.static_tf_broadcaster.sendTransform([base_to_lidar, base_to_imu])
+        self.static_tf_broadcaster.sendTransform([base_to_lidar_top, base_to_imu, base_to_gnss])
 
     def _publish_dynamic_transforms(self, state_msg):
         # Create transform from map to base_link
         map_to_base = TransformStamped()
-        map_to_base.header.stamp = self.clock
-        map_to_base.header.frame_id = 'map'
+        map_to_base.header = get_header('map')
         map_to_base.child_frame_id = 'base_link'
 
-        map_to_base.transform.translation.x = self.initial_pose['x'] + state_msg['pos'][0]
-        map_to_base.transform.translation.y = self.initial_pose['y'] + state_msg['pos'][1]
+        map_to_base.transform.translation.x = state_msg['pos'][0]
+        map_to_base.transform.translation.y = state_msg['pos'][1]
         map_to_base.transform.translation.z = self.initial_pose['z'] 
         
         quat = self.direction_to_quaternion(state_msg['dir'])
@@ -284,88 +289,6 @@ class AutowareBeamngBridge(Node):
         map_to_base.transform.rotation.w = quat[3]
 
         self.tf_broadcaster.sendTransform(map_to_base)
-
-    def publish_lidar_data(self, point_cloud):
-        # Publish LIDAR data
-        msg = PointCloud2()
-        msg.header = Header()
-        msg.header.stamp = self.clock
-        msg.header.frame_id = 'velodyne_top_changed'
-        
-        # Get number of points
-        num_points = len(point_cloud)
-        
-        # Create a byte array to hold all point data
-        # 32 bytes per point as specified in the error message
-        buffer = bytearray(num_points * 32)
-        
-        # For each point, manually pack the data into the buffer
-        for i, point in enumerate(point_cloud):
-            # Calculate buffer offset for this point
-            offset = i * 32
-            
-            # Pack XYZ as float32 (4 bytes each)
-            x_bytes = np.float32(point[0]).tobytes()
-            y_bytes = np.float32(point[1]).tobytes()
-            z_bytes = np.float32(point[2]).tobytes()
-            
-            # Copy XYZ bytes to buffer
-            buffer[offset:offset+4] = x_bytes
-            buffer[offset+4:offset+8] = y_bytes
-            buffer[offset+8:offset+12] = z_bytes
-            
-            # Set intensity (uint8, 1 byte)
-            buffer[offset+12] = 100  # Default intensity
-            
-            # Set return_type (uint8, 1 byte)
-            buffer[offset+13] = 0
-            
-            # Set channel (uint16, 2 bytes)
-            channel_bytes = np.uint16(0).tobytes()
-            buffer[offset+14:offset+16] = channel_bytes
-            
-            # Calculate and set azimuth (float32, 4 bytes)
-            azimuth = np.float32(np.arctan2(point[1], point[0])).tobytes()
-            buffer[offset+16:offset+20] = azimuth
-            
-            # Calculate and set elevation (float32, 4 bytes)
-            xy_dist = np.sqrt(point[0]**2 + point[1]**2)
-            elevation = np.float32(np.arctan2(point[2], xy_dist)).tobytes()
-            buffer[offset+20:offset+24] = elevation
-            
-            # Calculate and set distance (float32, 4 bytes)
-            distance = np.float32(np.sqrt(point[0]**2 + point[1]**2 + point[2]**2)).tobytes()
-            buffer[offset+24:offset+28] = distance
-            
-            # Set timestamp (float32, 4 bytes)
-            timestamp = np.float32(self.get_clock().now().nanoseconds / 1e9).tobytes()
-            buffer[offset+28:offset+32] = timestamp
-        
-        # Set up the PointCloud2 message
-        msg.height = 1
-        msg.width = num_points
-        
-        # Define fields with correct offsets
-        msg.fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            PointField(name='intensity', offset=12, datatype=PointField.UINT8, count=1),
-            PointField(name='return_type', offset=13, datatype=PointField.UINT8, count=1),
-            PointField(name='channel', offset=14, datatype=PointField.UINT16, count=1),
-            PointField(name='azimuth', offset=16, datatype=PointField.FLOAT32, count=1),
-            PointField(name='elevation', offset=20, datatype=PointField.FLOAT32, count=1),
-            PointField(name='distance', offset=24, datatype=PointField.FLOAT32, count=1),
-            PointField(name='time_stamp', offset=28, datatype=PointField.FLOAT32, count=1)
-        ]
-        
-        msg.is_bigendian = False
-        msg.point_step = 32  # Total size of one point in bytes
-        msg.row_step = msg.point_step * num_points
-        msg.data = bytes(buffer)  # Convert bytearray to bytes
-        msg.is_dense = True
-        
-        self.pub_lidar.publish(msg)
 
     def direction_to_quaternion(self, direction, forward_reference=np.array([1, 0, 0])):
         """
