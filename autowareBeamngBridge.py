@@ -36,9 +36,9 @@ class AutowareBeamngBridge(Node):
         self.timestamp = 0.0
         self.clock = Time(sec=0)
         self.initial_pose = {
-            'x': 3739.25,
-            'y': 73729.0,
-            'z': 0.0
+            'x': -170.09, 
+            'y': 517.71,
+            'z':  74.99,
         }
 
         self.initial_orientation = {

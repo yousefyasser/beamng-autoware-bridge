@@ -30,9 +30,9 @@ class ScenarioRunner:
             self.bng.open(launch=False)
             
             scenario = Scenario(
-                "smallgrid",
-                "LiDAR_demo",
-                description="Spanning the map with a LiDAR sensor",
+                "west_coast_usa",  # Use Italy map
+                "LiDAR_map_generator",
+                description="Generating a point cloud map with LiDAR",
             )
 
             self.car = Vehicle(
@@ -42,7 +42,8 @@ class ScenarioRunner:
                 color='Red'
             )
             
-            scenario.add_vehicle(self.car, pos=(0,0,0), rot_quat=(0.0, 0.0, 0.15, 0.258382))
+            scenario.add_vehicle(self.car, pos=(-170.09, 517.71, 74.99),
+            rot_quat=(-0.0046, 0.0095, 0.0074, 0.99))
             
             scenario.make(self.bng)
             self.bng.load_scenario(scenario)
