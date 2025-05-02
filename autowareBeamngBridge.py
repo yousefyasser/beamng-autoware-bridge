@@ -1,28 +1,18 @@
-import numpy as np
 
 from rclpy.node import Node
+from scipy.spatial.transform import Rotation as R
+import datetime, time, math, tf2_ros, numpy as np
 
-import tf2_ros
-
-import datetime
-import time
-import math
-
-from builtin_interfaces.msg import Time
-from rosgraph_msgs.msg import Clock
 from std_msgs.msg import Header
-
-from sensor_msgs.msg import PointCloud2, PointField, Imu, Image, CameraInfo
-from geometry_msgs.msg import TransformStamped, PoseStamped, PoseWithCovarianceStamped
-
+from rosgraph_msgs.msg import Clock
 from beamng_msgs.msg import StateSensor
-
-from autoware_vehicle_msgs.msg import SteeringReport, VelocityReport, ControlModeReport, GearReport
+from builtin_interfaces.msg import Time
+from sensor_msgs.msg import PointCloud2, PointField, Imu, Image, CameraInfo
 from tier4_vehicle_msgs.msg import ActuationCommandStamped, ActuationStatusStamped
+from geometry_msgs.msg import TransformStamped, PoseStamped, PoseWithCovarianceStamped
+from autoware_vehicle_msgs.msg import SteeringReport, VelocityReport, ControlModeReport, GearReport
 
 from vehicleStatusPublisher import VehicleStatusPublisher
-
-from scipy.spatial.transform import Rotation as R
 
 
 class AutowareBeamngBridge(Node):
@@ -36,17 +26,41 @@ class AutowareBeamngBridge(Node):
         self.timestamp = 0.0
         self.clock = Time(sec=0)
         self.initial_pose = {
-            'x': 3739.25,
-            'y': 73729.0,
-            'z': 0.0
+            'x': 237.90,
+            'y': -894.42,
+            'z': 246.10
         }
-
         self.initial_orientation = {
-            'x': 0.0,
-            'y': 0.0,
-            'z': -0.966043,
-            'w': 0.258382,
+            'x': 0.0173,
+            'y': -0.0019,
+            'z': -0.6354,
+            'w': 0.7720,
         }
+        
+        # self.initial_pose = {
+        #     'x': 0.0,
+        #     'y': 0.0,
+        #     'z': 0.0
+        # }
+        # self.initial_orientation = {
+        #     'x': 0.0,
+        #     'y': 0.0,
+        #     'z': 0.0,
+        #     'w': 1.0,
+        # }
+
+        # self.initial_pose = {
+        #     'x': 3739.25,
+        #     'y': 73729.0,
+        #     'z': 0.0
+        # }
+
+        # self.initial_orientation = {
+        #     'x': 0.0,
+        #     'y': 0.0,
+        #     'z': -0.966043,
+        #     'w': 0.258382,
+        # }
 
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         self.static_tf_broadcaster = tf2_ros.StaticTransformBroadcaster(self)
@@ -55,7 +69,7 @@ class AutowareBeamngBridge(Node):
         self._create_subscriptions()
         
         self._publish_static_transforms()
-        self._publish_initial_pose()
+        # self._publish_initial_pose()
 
         publishers = {
             'steering_state': self.pub_steering_state,
@@ -79,9 +93,9 @@ class AutowareBeamngBridge(Node):
             Clock, '/clock', 10
         )
 
-        self.initial_pose_publisher = self.create_publisher(
-            PoseStamped, '/initialpose', 1
-        )
+        # self.initial_pose_publisher = self.create_publisher(
+        #     PoseStamped, '/initialpose', 1
+        # )
 
 
         # ============ Sensors Publishers =================
@@ -126,28 +140,27 @@ class AutowareBeamngBridge(Node):
         #     ActuationCommandStamped, "/control/command/actuation_cmd", self.control_callback, 1
         # )
 
-    def _publish_initial_pose(self):
-        # Create PoseStamped message
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()     
-        pose_msg.header.frame_id = 'map'
+    # def _publish_initial_pose(self):
+    #     # Create PoseStamped message
+    #     pose_msg = PoseStamped()
+    #     pose_msg.header.stamp = self.clock    
+    #     pose_msg.header.frame_id = 'map'
 
-        # Set position
-        pose_msg.pose.position.x = self.initial_pose['x']
-        pose_msg.pose.position.y = self.initial_pose['y']
-        pose_msg.pose.position.z = self.initial_pose['z']
+    #     # Set position
+    #     pose_msg.pose.position.x = self.initial_pose['x']
+    #     pose_msg.pose.position.y = self.initial_pose['y']
+    #     pose_msg.pose.position.z = self.initial_pose['z']
 
-        pose_msg.pose.orientation.x = self.initial_orientation['x']
-        pose_msg.pose.orientation.y = self.initial_orientation['y']
-        pose_msg.pose.orientation.z = self.initial_orientation['z']
-        pose_msg.pose.orientation.w = self.initial_orientation['w']
+    #     pose_msg.pose.orientation.x = self.initial_orientation['x']
+    #     pose_msg.pose.orientation.y = self.initial_orientation['y']
+    #     pose_msg.pose.orientation.z = self.initial_orientation['z']
+    #     pose_msg.pose.orientation.w = self.initial_orientation['w']
 
-        # Publish the message
-        self.initial_pose_publisher.publish(pose_msg)
-        self.get_logger().info("Published initial pose to /initialpose")
+    #     # Publish the message
+    #     self.initial_pose_publisher.publish(pose_msg)
+    #     self.get_logger().info("Published initial pose to /initialpose")
 
     def publish_sim_time(self):
-        # self.timestamp += 1/60
         self.timestamp = time.time()
 
         seconds = int(self.timestamp)
@@ -221,7 +234,6 @@ class AutowareBeamngBridge(Node):
 
         self.pub_imu.publish(out_imu_msg)
         
-
     def _publish_static_transforms(self):
         # Create transform from base_link to lidar
         base_to_lidar = TransformStamped()
@@ -256,7 +268,7 @@ class AutowareBeamngBridge(Node):
     def _publish_dynamic_transforms(self, state_msg):
         # Create transform from map to base_link
         map_to_base = TransformStamped()
-        map_to_base.header.stamp = self.get_clock().now().to_msg()
+        map_to_base.header.stamp = self.clock
         map_to_base.header.frame_id = 'map'
         map_to_base.child_frame_id = 'base_link'
 

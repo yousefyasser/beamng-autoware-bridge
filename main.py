@@ -1,15 +1,10 @@
-from autowareBeamngBridge import AutowareBeamngBridge
+import rclpy, sys, os, subprocess, time, threading, numpy as np
 
 from beamngpy import BeamNGpy, Scenario, Vehicle
 from beamngpy.sensors import Camera, Lidar, Radar, State, Electrics, AdvancedIMU
 
-import rclpy
-import sys
-import os
-import subprocess
-import time
-import numpy as np
-import threading
+from autowareBeamngBridge import AutowareBeamngBridge
+
 
 class ScenarioRunner:
     def __init__(self):
@@ -30,7 +25,8 @@ class ScenarioRunner:
             self.bng.open(launch=False)
             
             scenario = Scenario(
-                "smallgrid",
+                # "smallgrid",
+                "italy",
                 "LiDAR_demo",
                 description="Spanning the map with a LiDAR sensor",
             )
@@ -41,8 +37,9 @@ class ScenarioRunner:
                 licence='RED',
                 color='Red'
             )
-            
-            scenario.add_vehicle(self.car, pos=(0,0,0), rot_quat=(0.0, 0.0, 0.15, 0.258382))
+        
+            scenario.add_vehicle(self.car, pos=(237.90,-894.42,246.10), rot_quat=(0.0173,-0.0019,-0.6354,0.7720))
+            # scenario.add_vehicle(self.car, pos=(0,0,0), rot_quat=(0.0, 0.0, 0.15, 0.258382))
             
             scenario.make(self.bng)
             self.bng.load_scenario(scenario)

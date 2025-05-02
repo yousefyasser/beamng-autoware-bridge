@@ -1,9 +1,8 @@
 import numpy as np
 
 from std_msgs.msg import Header
-
-from autoware_vehicle_msgs.msg import SteeringReport, VelocityReport, ControlModeReport, GearReport
 from tier4_vehicle_msgs.msg import ActuationCommandStamped, ActuationStatusStamped
+from autoware_vehicle_msgs.msg import SteeringReport, VelocityReport, ControlModeReport, GearReport
 
 class VehicleStatusPublisher:
     def __init__(self, clock, electrics, state, publishers):
